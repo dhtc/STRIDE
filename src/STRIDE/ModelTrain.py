@@ -100,7 +100,7 @@ def stProcess(st_count_file, st_scale_factor = None):
     return({'scale_matrix': st_count_scale_mat, "raw_matrix": st_count_mat,"genes": st_count_genes, "spots": st_count_spots})
 
 
-def LDA(sc_corpus, ntopics, genes_dict, genes_shared, cell_gene_list, sc_count_cells, cell_celltype_list, model_dir):
+def LDA(sc_corpus, ntopics, genes_dict, genes_shared, sc_count_cells, cell_celltype_list, model_dir):
     lda = LdaModel(corpus = sc_corpus, num_topics = ntopics, id2word = genes_dict)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
@@ -109,8 +109,6 @@ def LDA(sc_corpus, ntopics, genes_dict, genes_shared, cell_gene_list, sc_count_c
     # compute the coherence
     cm = CoherenceModel(model = lda, corpus = sc_corpus, coherence='u_mass')
     umass_coherence = cm.get_coherence()
-    cm = CoherenceModel(model = lda, corpus = sc_corpus, texts = cell_gene_list, coherence='c_v')
-    cv_coherence = cm.get_coherence()
     # save the topic-cell matrix
     topic_cell = lda.get_document_topics(sc_corpus)
     topic_cell_mat = gensim.matutils.corpus2csc(topic_cell)
@@ -150,7 +148,7 @@ def LDA(sc_corpus, ntopics, genes_dict, genes_shared, cell_gene_list, sc_count_c
     topic_celltype_file = os.path.join(model_dir,"topic_celltype_mat_%s.txt" %(ntopics))
     topic_celltype_df.to_csv(topic_celltype_file, sep="\t")
     # return results
-    res_dict = {"coherence": [umass_coherence, cv_coherence], 
+    res_dict = {"coherence": [umass_coherence], 
     "topic_cell_mat": topic_cell_mat, 
     "topic_celltype_df": topic_celltype_df,
     "celltype_num_dict": celltype_num_dict}
@@ -158,9 +156,8 @@ def LDA(sc_corpus, ntopics, genes_dict, genes_shared, cell_gene_list, sc_count_c
     return(res_dict)
 
 
-def ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, cell_gene_list, sc_count_cells, cell_celltype_list, model_dir):
+def ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, sc_count_cells, cell_celltype_list, model_dir):
     umass_coherence_values = []
-    cv_coherence_values = []
     accuracy_raw_list = []
     nmi_list = []
     accuracy_norm_list = []
@@ -170,9 +167,9 @@ def ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, cell_gene_l
     celltype_prediction_dict = defaultdict(dict)
     for ntopics in ntopics_list:
         print("Number of topics: %s" %(ntopics))
-        res_dict = LDA(sc_corpus, ntopics, genes_dict, genes_shared, cell_gene_list, sc_count_cells, cell_celltype_list, model_dir)
+        res_dict = LDA(sc_corpus, ntopics, genes_dict, genes_shared, sc_count_cells, cell_celltype_list, model_dir)
         umass_coherence_values.append(res_dict["coherence"][0])
-        cv_coherence_values.append(res_dict["coherence"][1])
+
         topic_cell_mat = res_dict["topic_cell_mat"]
         topic_celltype_df = res_dict["topic_celltype_df"]
         celltype_num_dict = res_dict["celltype_num_dict"]
@@ -195,7 +192,6 @@ def ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, cell_gene_l
         celltype_prediction_dict["BayesNorm"][ntopics] = bayesnorm_res["celltype_prediction"]
     metrics_df = pd.DataFrame({"Topic": ntopics_list, 
         "umass_coherence": umass_coherence_values, 
-        "cv_coherence": cv_coherence_values, 
         "nmi": nmi_list,
         "Raw_accuracy": accuracy_raw_list,
         "Norm_accuracy": accuracy_norm_list,
@@ -206,15 +202,14 @@ def ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, cell_gene_l
     return({"metrics_df": metrics_df, "celltype_prediction_dict": celltype_prediction_dict})
 
 
-def ModelSelect(sc_corpus, genes_dict, genes_shared, ntopics_list, cell_gene_list, sc_count_cells, cell_celltype_list, out_dir):
+def ModelSelect(sc_corpus, genes_dict, genes_shared, ntopics_list, sc_count_cells, cell_celltype_list, out_dir):
     model_dir = os.path.join(out_dir, "model")
-    evaluate_res = ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, cell_gene_list, sc_count_cells, cell_celltype_list, model_dir)
+    evaluate_res = ModelEvaluate(sc_corpus, genes_dict, genes_shared, ntopics_list, sc_count_cells, cell_celltype_list, model_dir)
     celltype_prediction_dict = evaluate_res["celltype_prediction_dict"]
     metrics_df = evaluate_res["metrics_df"]
     metrics_df.to_csv(os.path.join(out_dir, "Model_selection.txt"), sep="\t", index = False)
     # select the model and the optimal topic number
-    # model_selected = metrics_df.iloc[:, range(4,9)].max().idxmax()
-    model_selected = metrics_df.iloc[:, range(4,9)].mean(0).idxmax()
+    model_selected = metrics_df.iloc[:, range(3,8)].mean(0).idxmax()
     ntopic_selected = metrics_df.iloc[metrics_df.loc[:, model_selected].idxmax(), 0]
     sns.set(style="white")
     f, ax = plt.subplots(figsize=(6, 4))
@@ -270,13 +265,7 @@ def scLDA(sc_count_mat, sc_count_genes, sc_count_cells, cell_celltype_dict,
     genes_shared_array = np.array(genes_shared)
     genes_shared_index = sc_count_genes_sorter[np.searchsorted(sc_count_genes_array, genes_shared_array, sorter = sc_count_genes_sorter)]
     sc_count_mat_use = sc_count_mat[genes_shared_index,:]
-    cell_gene_list = []
-    sc_count_mat_use_nonzero = sc_count_mat_use.nonzero()
-    for i in range(sc_count_mat_use.shape[1]):
-        gene_ind = sc_count_mat_use_nonzero[0][sc_count_mat_use_nonzero[1] == i]
-        genes = genes_shared_array[gene_ind].tolist()
-        cell_gene_list.append(genes)
-        # evaluate the model
+
     # construct single-cell gene corpus
     sc_corpus = gensim.matutils.Sparse2Corpus(sc_count_mat_use)
     genes_dict = Dictionary([genes_shared])
@@ -288,7 +277,7 @@ def scLDA(sc_count_mat, sc_count_genes, sc_count_cells, cell_celltype_dict,
         cell_celltype_list.append(cell_celltype)
     print("Selecting the optimal model.")
     model_selection_res = ModelSelect(sc_corpus = sc_corpus, genes_dict = genes_dict, genes_shared = genes_shared,
-        ntopics_list = ntopics_list, cell_gene_list = cell_gene_list, sc_count_cells = sc_count_cells, 
+        ntopics_list = ntopics_list, sc_count_cells = sc_count_cells, 
         cell_celltype_list = cell_celltype_list, out_dir = out_dir)
     model_selected = model_selection_res["model"]
     ntopics_selected = model_selection_res["ntopics"]
