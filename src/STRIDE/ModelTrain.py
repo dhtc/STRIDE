@@ -242,7 +242,7 @@ def ModelRetrieve(model_dir, st_count_genes):
     metrics_df = pd.read_csv(os.path.join(model_dir, "..", "Model_selection.txt"), sep="\t", index_col=False, header=0)
     # select the model and the optimal topic number
     # model_selected = metrics_df.iloc[:, range(4,9)].max().idxmax()
-    model_selected = metrics_df.iloc[:, range(4,9)].mean(0).idxmax()
+    model_selected = metrics_df.iloc[:, range(3,8)].mean(0).idxmax()
     ntopic_selected = metrics_df.iloc[metrics_df.loc[:, model_selected].idxmax(), 0]
     genes_dict_file = os.path.join(model_dir, "..", "Gene_dict.txt")
     genes_dict = Dictionary.load_from_text(genes_dict_file)
